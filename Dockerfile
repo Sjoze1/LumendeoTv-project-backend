@@ -1,35 +1,42 @@
-# Use official PHP 8.1 with FPM
-FROM php:8.1-fpm
+# Use official PHP image with FPM
+FROM php:8.2-fpm
 
-# Install system dependencies and PHP extensions needed by Laravel
+# Install system dependencies
 RUN apt-get update && apt-get install -y \
     git \
-    zip \
     unzip \
-    curl \
-    libpng-dev \
-    libonig-dev \
-    libxml2-dev \
+    zip \
     libzip-dev \
-    && docker-php-ext-install pdo_mysql mbstring exif pcntl bcmath gd zip
+    libonig-dev \
+    libpng-dev \
+    libjpeg-dev \
+    libfreetype6-dev \
+    libxml2-dev \
+    libcurl4-openssl-dev \
+    pkg-config \
+    libssl-dev \
+    && docker-php-ext-configure gd --with-freetype --with-jpeg \
+    && docker-php-ext-install pdo_mysql mbstring zip exif pcntl gd soap curl bcmath
 
-# Install Composer globally
+# Install Composer
 COPY --from=composer:latest /usr/bin/composer /usr/bin/composer
 
-# Set working directory inside container
+# Set working directory
 WORKDIR /var/www/html
 
-# Copy project files to container
+# Copy project files
 COPY . .
 
-# Install PHP dependencies without dev packages for production
+# Install PHP dependencies
 RUN composer install --no-dev --optimize-autoloader
 
-# Generate Laravel application key (optional, you can do this at runtime or use env var)
+# Generate app key
 RUN php artisan key:generate
 
-# Expose port 8000 to the outside of the container
-EXPOSE 8000
+# Set permissions
+RUN chown -R www-data:www-data storage bootstrap/cache \
+    && chmod -R 775 storage bootstrap/cache
 
-# Start Laravel built-in server listening on all interfaces and port 8000
-CMD ["php", "artisan", "serve", "--host=0.0.0.0", "--port=8000"]
+# Expose port 9000 and start PHP-FPM server
+EXPOSE 9000
+CMD ["php-fpm"]
