@@ -6,7 +6,6 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 use App\Models\MpesaPayment;
-use Carbon\Carbon;
 
 class MpesaController extends Controller
 {
@@ -27,21 +26,17 @@ class MpesaController extends Controller
         $this->baseUrl = config('mpesa.base_url', 'https://sandbox.safaricom.co.ke');
     }
 
-    /**
-     * Get OAuth access token from M-Pesa API
-     */
     protected function getAccessToken()
     {
         $tokenUrl = "{$this->baseUrl}/oauth/v1/generate?grant_type=client_credentials";
 
-        Log::info('Requesting OAuth token from M-Pesa', ['url' => $tokenUrl]);
+        Log::info('Requesting OAuth token from M-Pesa');
 
         $response = Http::withBasicAuth($this->consumerKey, $this->consumerSecret)
             ->get($tokenUrl);
 
         if ($response->successful()) {
             $body = $response->json();
-            Log::info('Received OAuth token', ['token' => substr($body['access_token'], 0, 10) . '...']);
             return $body['access_token'] ?? null;
         }
 
@@ -53,7 +48,7 @@ class MpesaController extends Controller
     {
         $request->validate([
             'amount' => 'required|numeric|min:1',
-            'phone' => ['required', 'regex:/^2547\d{8}$/'], // Accepts 2547XXXXXXXX only
+            'phone' => ['required', 'regex:/^2547\d{8}$/'], 
         ]);
 
         $accessToken = $this->getAccessToken();
@@ -78,8 +73,6 @@ class MpesaController extends Controller
             "TransactionDesc" => $request->input('desc', 'Payment'),
         ];
 
-        Log::info('Sending STK Push request', ['payload' => $payload]);
-
         $stkPushUrl = "{$this->baseUrl}/mpesa/stkpush/v1/processrequest";
 
         $stkResponse = Http::withToken($accessToken)
@@ -101,42 +94,54 @@ class MpesaController extends Controller
         ]);
     }
 
-    public function handleCallback(Request $request)
-    {
-        try {
-            $data = $request->all();
-            Log::info('M-Pesa Callback Received:', $data);
-    
-            $callback = data_get($data, 'Body.stkCallback');
-            if (is_null($callback)) {
-                Log::warning('Invalid M-Pesa callback structure:', $data);
-                return response()->json(['ResultCode' => 1, 'ResultDesc' => 'Invalid callback structure'], 400);
-            }
-    
-            if ($callback['ResultCode'] === 0) {
-                // Make sure all keys exist, else null
-                $payment = \App\Models\MpesaPayment::updateOrCreate(
-                    ['checkout_request_id' => $callback['CheckoutRequestID']],
-                    [
-                        'phone' => $callback['PhoneNumber'] ?? null,
-                        'merchant_request_id' => $callback['MerchantRequestID'] ?? null,
-                        'mpesa_receipt_number' => $callback['MpesaReceiptNumber'] ?? null,
-                        'amount' => $callback['Amount'] ?? 0,
-                        'status' => 'success',
-                        'response' => json_encode($callback),
-                        'paid_at' => now(),
-                    ]
-                );
-    
-                Log::info("Payment saved: ID {$payment->id}");
-            } else {
-                Log::warning("Transaction failed: " . ($callback['ResultDesc'] ?? 'No description'));
-            }
-    
-            return response()->json(['ResultCode' => 0, 'ResultDesc' => 'Callback received and processed.']);
-        } catch (\Throwable $e) {
-            Log::error('Error processing M-Pesa callback: ' . $e->getMessage(), ['trace' => $e->getTraceAsString()]);
-            return response()->json(['ResultCode' => 1, 'ResultDesc' => 'Server error'], 500);
+public function handleCallback(Request $request)
+{
+    Log::info('Mpesa callback received:', $request->all());
+
+    try {
+        $data = $request->input('Body.stkCallback');
+        if (!$data) {
+            Log::warning('No stkCallback data in request.');
+            return response()->json(['ResultCode' => 1, 'ResultDesc' => 'Invalid callback data']);
         }
+
+        // Convert M-Pesa transaction date string to timestamp
+        $paidAt = null;
+        if (!empty($data['TransactionDate'])) {
+            $paidAt = \DateTime::createFromFormat('YmdHis', $data['TransactionDate']);
+            if ($paidAt) {
+                $paidAt = $paidAt->format('Y-m-d H:i:s');
+            } else {
+                $paidAt = null;
+            }
+        }
+
+        MpesaPayment::updateOrCreate(
+            ['checkout_request_id' => $data['CheckoutRequestID']],
+            [
+                'phone' => $data['PhoneNumber'] ?? null,
+                'merchant_request_id' => $data['MerchantRequestID'] ?? null,
+                'amount' => $data['Amount'] ?? 0,
+                'status' => $data['ResultCode'] === 0 ? 'success' : 'failed',
+                'response' => json_encode($request->all()),
+                'mpesa_receipt_number' => $data['MpesaReceiptNumber'] ?? null,
+                'transaction_date' => $data['TransactionDate'] ?? null,
+                'failure_reason' => $data['ResultDesc'] ?? null,
+                'paid_at' => $paidAt,
+            ]
+        );
+
+        Log::info('Mpesa payment saved/updated.');
+
+        return response()->json(['ResultCode' => 0, 'ResultDesc' => 'Success']);
+    } catch (\Throwable $e) {
+        Log::error('Callback handler error:', [
+            'message' => $e->getMessage(),
+            'trace' => $e->getTraceAsString(),
+            'request' => $request->all(),
+        ]);
+        return response()->json(['ResultCode' => 1, 'ResultDesc' => 'Server error']);
     }
-}    
+}
+
+}
