@@ -48,7 +48,7 @@ class MpesaController extends Controller
     {
         $request->validate([
             'amount' => 'required|numeric|min:1',
-            'phone' => ['required', 'regex:/^2547\d{8}$/'], 
+            'phone' => ['required', 'regex:/^2547\d{8}$/'],
         ]);
 
         $accessToken = $this->getAccessToken();
@@ -94,54 +94,95 @@ class MpesaController extends Controller
         ]);
     }
 
-public function handleCallback(Request $request)
-{
-    Log::info('Mpesa callback received:', $request->all());
+    public function handleCallback(Request $request)
+    {
+        Log::info('Mpesa callback received - Raw Request Body:', $request->all());
 
-    try {
-        $data = $request->input('Body.stkCallback');
-        if (!$data) {
-            Log::warning('No stkCallback data in request.');
-            return response()->json(['ResultCode' => 1, 'ResultDesc' => 'Invalid callback data']);
-        }
+        try {
+            // Attempt to get the stkCallback data from the 'Body' key
+            $body = $request->input('Body.stkCallback');
+            
+            Log::info('Mpesa callback - Extracted Body.stkCallback:', (array) $body);
 
-        // Convert M-Pesa transaction date string to timestamp
-        $paidAt = null;
-        if (!empty($data['TransactionDate'])) {
-            $paidAt = \DateTime::createFromFormat('YmdHis', $data['TransactionDate']);
-            if ($paidAt) {
-                $paidAt = $paidAt->format('Y-m-d H:i:s');
-            } else {
-                $paidAt = null;
+            if (empty($body)) { // Using empty to check for null or empty array
+                Log::warning('Mpesa callback - Body.stkCallback is empty or null.');
+                return response()->json([
+                    'ResultCode' => 1,
+                    'ResultDesc' => 'Invalid or empty callback data',
+                ]);
             }
+
+            // Extract necessary fields
+            // Use null coalescing operator defensively for all accesses
+            $merchantRequestId = $body['MerchantRequestID'] ?? null;
+            $checkoutRequestId = $body['CheckoutRequestID'] ?? null;
+            $resultCode = $body['ResultCode'] ?? null;
+            $resultDesc = $body['ResultDesc'] ?? null; // Added resultDesc
+
+            Log::info('Mpesa callback - Extracted main fields:', [
+                'MerchantRequestID' => $merchantRequestId,
+                'CheckoutRequestID' => $checkoutRequestId,
+                'ResultCode' => $resultCode,
+                'ResultDesc' => $resultDesc,
+            ]);
+
+            $callbackMetadata = $body['CallbackMetadata']['Item'] ?? [];
+            Log::info('Mpesa callback - Extracted CallbackMetadata.Item:', (array) $callbackMetadata);
+
+            // Extract values from CallbackMetadata
+            $data = [];
+            if (!empty($callbackMetadata) && is_array($callbackMetadata)) {
+                foreach ($callbackMetadata as $item) {
+                    if (isset($item['Name']) && isset($item['Value'])) {
+                        $data[$item['Name']] = $item['Value'];
+                    } else {
+                        Log::warning('Mpesa callback - CallbackMetadata item missing Name or Value:', (array) $item);
+                    }
+                }
+            } else {
+                Log::warning('Mpesa callback - CallbackMetadata.Item is empty or not an array.', (array) $callbackMetadata);
+            }
+
+            // You can log this for debugging
+            Log::info('Mpesa callback - Fully Parsed Callback Data:', $data);
+
+            // TODO: Save or process payment here...
+            // Example: If you were to save it, you might do something like:
+            // if ($resultCode == 0) {
+            //     MpesaPayment::create([
+            //         'merchant_request_id' => $merchantRequestId,
+            //         'checkout_request_id' => $checkoutRequestId,
+            //         'amount' => $data['Amount'] ?? null,
+            //         'mpesa_receipt_number' => $data['MpesaReceiptNumber'] ?? null,
+            //         'transaction_date' => $data['TransactionDate'] ?? null,
+            //         'phone_number' => $data['PhoneNumber'] ?? null,
+            //         'result_code' => $resultCode,
+            //         'result_desc' => $resultDesc,
+            //         'status' => 'COMPLETED',
+            //     ]);
+            //     Log::info('Mpesa callback - Payment record created successfully.');
+            // } else {
+            //     // Handle failed transaction, e.g., update a pending record
+            //     Log::warning('Mpesa callback - Transaction failed or cancelled:', ['resultCode' => $resultCode, 'resultDesc' => $resultDesc]);
+            // }
+
+
+            return response()->json([
+                'ResultCode' => 0,
+                'ResultDesc' => 'C2B Recieved Succesfully', // More descriptive success message for M-Pesa
+            ]);
+        } catch (\Exception $e) {
+            Log::error('Mpesa callback error: ' . $e->getMessage(), [
+                'file' => $e->getFile(),
+                'line' => $e->getLine(),
+                'trace' => $e->getTraceAsString(),
+                'request_payload' => $request->all(), // Log the full request payload on error
+            ]);
+            return response()->json([
+                'ResultCode' => 1,
+                'ResultDesc' => 'Server error during callback processing', // More specific error message
+            ]);
         }
-
-        MpesaPayment::updateOrCreate(
-            ['checkout_request_id' => $data['CheckoutRequestID']],
-            [
-                'phone' => $data['PhoneNumber'] ?? null,
-                'merchant_request_id' => $data['MerchantRequestID'] ?? null,
-                'amount' => $data['Amount'] ?? 0,
-                'status' => $data['ResultCode'] === 0 ? 'success' : 'failed',
-                'response' => json_encode($request->all()),
-                'mpesa_receipt_number' => $data['MpesaReceiptNumber'] ?? null,
-                'transaction_date' => $data['TransactionDate'] ?? null,
-                'failure_reason' => $data['ResultDesc'] ?? null,
-                'paid_at' => $paidAt,
-            ]
-        );
-
-        Log::info('Mpesa payment saved/updated.');
-
-        return response()->json(['ResultCode' => 0, 'ResultDesc' => 'Success']);
-    } catch (\Throwable $e) {
-        Log::error('Callback handler error:', [
-            'message' => $e->getMessage(),
-            'trace' => $e->getTraceAsString(),
-            'request' => $request->all(),
-        ]);
-        return response()->json(['ResultCode' => 1, 'ResultDesc' => 'Server error']);
     }
 }
 
-}
