@@ -5,6 +5,8 @@ namespace App\Http\Controllers;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
+use App\Models\MpesaPayment;
+use Carbon\Carbon;
 
 class MpesaController extends Controller
 {
@@ -106,21 +108,41 @@ class MpesaController extends Controller
     
         $callback = data_get($data, 'Body.stkCallback');
     
-        if (is_null($callback)) {
+        if (!$callback) {
             Log::warning('Invalid M-Pesa callback structure:', $data);
             return response()->json(['ResultCode' => 1, 'ResultDesc' => 'Invalid callback structure'], 400);
         }
     
+        $commonFields = [
+            'phone' => data_get($callback, 'CallbackMetadata.Item.4.Value') ?? data_get($callback, 'PhoneNumber'),
+            'checkout_request_id' => $callback['CheckoutRequestID'] ?? null,
+            'merchant_request_id' => $callback['MerchantRequestID'] ?? null,
+            'amount' => data_get($callback, 'CallbackMetadata.Item.0.Value', 0),
+            'response' => json_encode($callback),
+            'paid_at' => now(),
+        ];
+    
         if ($callback['ResultCode'] === 0) {
-            Log::info("Successful transaction: Receipt {$callback['MpesaReceiptNumber']}, Amount {$callback['Amount']}, Phone {$callback['PhoneNumber']}, CheckoutRequestID {$callback['CheckoutRequestID']}");
-            // Save transaction or update order status here
+            MpesaPayment::updateOrCreate(
+                ['checkout_request_id' => $commonFields['checkout_request_id']],
+                array_merge($commonFields, [
+                    'mpesa_receipt_number' => data_get($callback, 'CallbackMetadata.Item.1.Value'),
+                    'transaction_date' => data_get($callback, 'CallbackMetadata.Item.3.Value'),
+                    'status' => 'success',
+                ])
+            );
+            Log::info('MpesaPayment saved successfully.');
         } else {
-            $resultCode = $callback['ResultCode'];
-            $desc = $callback['ResultDesc'];
-            Log::warning("Failed transaction: $resultCode - $desc");
-            // Optional: Save failed transaction info
+            MpesaPayment::updateOrCreate(
+                ['checkout_request_id' => $commonFields['checkout_request_id']],
+                array_merge($commonFields, [
+                    'status' => 'failed',
+                    'failure_reason' => $callback['ResultDesc'] ?? 'Unknown error',
+                ])
+            );
+            Log::warning("MpesaPayment failed: {$callback['ResultDesc']}");
         }
     
         return response()->json(['ResultCode' => 0, 'ResultDesc' => 'Callback received and processed.']);
-    }    
+    }      
 }
