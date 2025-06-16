@@ -103,46 +103,40 @@ class MpesaController extends Controller
 
     public function handleCallback(Request $request)
     {
-        $data = $request->all();
-        Log::info('M-Pesa Callback Received:', $data);
+        try {
+            $data = $request->all();
+            Log::info('M-Pesa Callback Received:', $data);
     
-        $callback = data_get($data, 'Body.stkCallback');
+            $callback = data_get($data, 'Body.stkCallback');
+            if (is_null($callback)) {
+                Log::warning('Invalid M-Pesa callback structure:', $data);
+                return response()->json(['ResultCode' => 1, 'ResultDesc' => 'Invalid callback structure'], 400);
+            }
     
-        if (!$callback) {
-            Log::warning('Invalid M-Pesa callback structure:', $data);
-            return response()->json(['ResultCode' => 1, 'ResultDesc' => 'Invalid callback structure'], 400);
+            if ($callback['ResultCode'] === 0) {
+                // Make sure all keys exist, else null
+                $payment = \App\Models\MpesaPayment::updateOrCreate(
+                    ['checkout_request_id' => $callback['CheckoutRequestID']],
+                    [
+                        'phone' => $callback['PhoneNumber'] ?? null,
+                        'merchant_request_id' => $callback['MerchantRequestID'] ?? null,
+                        'mpesa_receipt_number' => $callback['MpesaReceiptNumber'] ?? null,
+                        'amount' => $callback['Amount'] ?? 0,
+                        'status' => 'success',
+                        'response' => json_encode($callback),
+                        'paid_at' => now(),
+                    ]
+                );
+    
+                Log::info("Payment saved: ID {$payment->id}");
+            } else {
+                Log::warning("Transaction failed: " . ($callback['ResultDesc'] ?? 'No description'));
+            }
+    
+            return response()->json(['ResultCode' => 0, 'ResultDesc' => 'Callback received and processed.']);
+        } catch (\Throwable $e) {
+            Log::error('Error processing M-Pesa callback: ' . $e->getMessage(), ['trace' => $e->getTraceAsString()]);
+            return response()->json(['ResultCode' => 1, 'ResultDesc' => 'Server error'], 500);
         }
-    
-        $commonFields = [
-            'phone' => data_get($callback, 'CallbackMetadata.Item.4.Value') ?? data_get($callback, 'PhoneNumber'),
-            'checkout_request_id' => $callback['CheckoutRequestID'] ?? null,
-            'merchant_request_id' => $callback['MerchantRequestID'] ?? null,
-            'amount' => data_get($callback, 'CallbackMetadata.Item.0.Value', 0),
-            'response' => json_encode($callback),
-            'paid_at' => now(),
-        ];
-    
-        if ($callback['ResultCode'] === 0) {
-            MpesaPayment::updateOrCreate(
-                ['checkout_request_id' => $commonFields['checkout_request_id']],
-                array_merge($commonFields, [
-                    'mpesa_receipt_number' => data_get($callback, 'CallbackMetadata.Item.1.Value'),
-                    'transaction_date' => data_get($callback, 'CallbackMetadata.Item.3.Value'),
-                    'status' => 'success',
-                ])
-            );
-            Log::info('MpesaPayment saved successfully.');
-        } else {
-            MpesaPayment::updateOrCreate(
-                ['checkout_request_id' => $commonFields['checkout_request_id']],
-                array_merge($commonFields, [
-                    'status' => 'failed',
-                    'failure_reason' => $callback['ResultDesc'] ?? 'Unknown error',
-                ])
-            );
-            Log::warning("MpesaPayment failed: {$callback['ResultDesc']}");
-        }
-    
-        return response()->json(['ResultCode' => 0, 'ResultDesc' => 'Callback received and processed.']);
-    }      
-}
+    }
+}    
