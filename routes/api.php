@@ -18,12 +18,21 @@ Route::post('/mpesa/stkpush', [MpesaController::class, 'initiateStkPush']);
 Route::post('/mpesa/callback', [MpesaController::class, 'handleCallback'])->withoutMiddleware(['api']);
 
 Route::get('/run-migrations', function (Request $request) {
-  // Optional: Add simple security check so only you can run this
   if ($request->header('X-SECRET') !== env('MIGRATION_SECRET')) {
       return response()->json(['message' => 'Unauthorized'], 401);
   }
 
-  Artisan::call('migrate', ['--force' => true]);
-
-  return response()->json(['message' => 'Migrations run successfully']);
+  try {
+      Artisan::call('migrate', ['--force' => true]);
+      return response()->json([
+          'message' => 'Migrations run successfully',
+          'output' => Artisan::output()
+      ]);
+  } catch (\Exception $e) {
+      return response()->json([
+          'message' => 'Migration failed',
+          'error' => $e->getMessage(),
+          'trace' => $e->getTraceAsString()
+      ], 500);
+  }
 });
