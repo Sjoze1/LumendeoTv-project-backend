@@ -53,67 +53,84 @@ class MpesaController extends Controller
     }
 
     public function initiateStkPush(Request $request)
-    {
-        $request->validate([
-            'amount' => 'required|numeric|min:1',
-            'phone' => ['required', 'regex:/^2547\d{8}$/'],
-        ]);
+{
+    $request->validate([
+        'amount' => 'required|numeric|min:1',
+        'phone' => ['required', 'regex:/^2547\d{8}$/'],
+    ]);
 
-        $accessToken = $this->getAccessToken();
-        if (!$accessToken) {
-            return response()->json(['status' => 'error', 'message' => 'Failed to get access token'], 500);
-        }
+    $accessToken = $this->getAccessToken();
+    if (!$accessToken) {
+        return response()->json(['status' => 'error', 'message' => 'Failed to get access token'], 500);
+    }
 
-        $timestamp = now()->format('YmdHis');
-        $password = base64_encode($this->shortcode . $this->passkey . $timestamp);
+    $timestamp = now()->format('YmdHis');
+    $password = base64_encode($this->shortcode . $this->passkey . $timestamp);
 
-        $payload = [
-            "BusinessShortCode" => $this->shortcode,
-            "Password" => $password,
-            "Timestamp" => $timestamp,
-            "TransactionType" => "CustomerPayBillOnline",
-            "Amount" => (int) $request->amount,
-            "PartyA" => $request->phone,
-            "PartyB" => $this->shortcode,
-            "PhoneNumber" => $request->phone,
-            "CallBackURL" => $this->callbackUrl,
-            "AccountReference" => $request->input('account_ref', 'PAYMENT_' . time()),
-            "TransactionDesc" => $request->input('desc', 'Payment'),
-        ];
+    $accountRef = $request->input('account_ref', 'PAYMENT_' . time());
+    $transactionDesc = $request->input('desc', 'Payment');
 
-        $stkPushUrl = "{$this->baseUrl}/mpesa/stkpush/v1/processrequest";
+    $payload = [
+        "BusinessShortCode" => $this->shortcode,
+        "Password" => $password,
+        "Timestamp" => $timestamp,
+        "TransactionType" => "CustomerPayBillOnline",
+        "Amount" => (int) $request->amount,
+        "PartyA" => $request->phone,
+        "PartyB" => $this->shortcode,
+        "PhoneNumber" => $request->phone,
+        "CallBackURL" => $this->callbackUrl,
+        "AccountReference" => $accountRef,
+        "TransactionDesc" => $transactionDesc,
+    ];
 
-        try {
-            $stkResponse = Http::withToken($accessToken)
-                ->timeout(30)
-                ->post($stkPushUrl, $payload);
+    $stkPushUrl = "{$this->baseUrl}/mpesa/stkpush/v1/processrequest";
 
-            if (!$stkResponse->ok()) {
-                Log::error('STK Push failed', [
-                    'response' => $stkResponse->json(),
-                    'status' => $stkResponse->status(),
-                ]);
-                return response()->json([
-                    'status' => 'error',
-                    'message' => 'STK Push initiation failed',
-                    'details' => $stkResponse->json(),
-                ], 500);
-            }
+    try {
+        $stkResponse = Http::withToken($accessToken)
+            ->timeout(30)
+            ->post($stkPushUrl, $payload);
 
-            return response()->json([
-                'status' => 'success',
-                'message' => 'STK Push initiated successfully',
-                'data' => $stkResponse->json(),
+        if (!$stkResponse->ok()) {
+            Log::error('STK Push failed', [
+                'response' => $stkResponse->json(),
+                'status' => $stkResponse->status(),
             ]);
-        } catch (\Exception $e) {
-            Log::error('STK Push request error', ['message' => $e->getMessage()]);
             return response()->json([
                 'status' => 'error',
-                'message' => 'STK Push error',
-                'details' => $e->getMessage(),
+                'message' => 'STK Push initiation failed',
+                'details' => $stkResponse->json(),
             ], 500);
         }
+
+        $responseData = $stkResponse->json();
+
+        // Save the STK Push attempt to the database
+        MpesaPayment::create([
+            'merchant_request_id' => $responseData['MerchantRequestID'] ?? null,
+            'checkout_request_id' => $responseData['CheckoutRequestID'] ?? null,
+            'amount' => $request->amount,
+            'phone_number' => $request->phone,
+            'account_reference' => $accountRef,
+            'transaction_desc' => $transactionDesc,
+            'status' => 'PENDING',
+            'response' => json_encode($responseData),
+        ]);
+
+        return response()->json([
+            'status' => 'success',
+            'message' => 'STK Push initiated successfully',
+            'data' => $responseData,
+        ]);
+    } catch (\Exception $e) {
+        Log::error('STK Push request error', ['message' => $e->getMessage()]);
+        return response()->json([
+            'status' => 'error',
+            'message' => 'STK Push error',
+            'details' => $e->getMessage(),
+        ], 500);
     }
+}
 
     public function handleCallback(Request $request)
     {
