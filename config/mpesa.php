@@ -7,4 +7,5 @@ return [
     'passkey' => env('MPESA_PASSKEY'),
     'callback_url' => env('MPESA_CALLBACK_URL'),
     'env' => env('MPESA_ENV', 'sandbox'), // Change to 'production' when ready
+    'base_url' => env('MPESA_BASE_URL', 'https://sandbox.safaricom.co.ke'), // Default to sandbox URL
 ];
