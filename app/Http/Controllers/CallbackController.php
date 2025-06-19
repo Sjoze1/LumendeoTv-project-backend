@@ -15,26 +15,29 @@ class CallbackController extends Controller
     public function receiveCallback(Request $request)
     {
         $data = $request->json()->all();
-
+    
         if (empty($data)) {
+            Log::warning('Callback received with empty JSON data');
             return response()->json(['error' => 'No JSON data received'], 400);
         }
-
+    
+        Log::info('Callback received', ['callback_data' => $data]);
+    
         $callbacks = Cache::get($this->cacheKey, []);
-
+    
         $callbacks[] = [
             'data' => $data,
             'timestamp' => now()->timestamp,
             'received_at' => now()->toIso8601String(),
         ];
-
+    
         Cache::put($this->cacheKey, $callbacks, now()->addHours(1));
-
+    
         return response()->json([
             'status' => 'success',
             'message' => 'Callback received',
         ]);
-    }
+    }    
 
     public function checkCallback()
     {

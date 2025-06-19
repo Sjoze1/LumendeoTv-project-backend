@@ -24,7 +24,7 @@ class MpesaController extends Controller
         $this->shortcode = config('mpesa.shortcode');
         $this->passkey = config('mpesa.passkey');
         $this->callbackUrl = config('mpesa.callback_url');
-        $this->baseUrl = config('mpesa.base_url', 'https://sandbox.safaricom.co.ke'); // Default to sandbox URL
+        $this->baseUrl = config('mpesa.base_url', 'https://sandbox.safaricom.co.ke');
     }
 
     protected function getAccessToken(): ?string
@@ -53,84 +53,83 @@ class MpesaController extends Controller
     }
 
     public function initiateStkPush(Request $request)
-{
-    $request->validate([
-        'amount' => 'required|numeric|min:1',
-        'phone' => ['required', 'regex:/^2547\d{8}$/'],
-    ]);
+    {
+        $request->validate([
+            'amount' => 'required|numeric|min:1',
+            'phone' => ['required', 'regex:/^2547\d{8}$/'],
+        ]);
 
-    $accessToken = $this->getAccessToken();
-    if (!$accessToken) {
-        return response()->json(['status' => 'error', 'message' => 'Failed to get access token'], 500);
-    }
-
-    $timestamp = now()->format('YmdHis');
-    $password = base64_encode($this->shortcode . $this->passkey . $timestamp);
-
-    $accountRef = $request->input('account_ref', 'PAYMENT_' . time());
-    $transactionDesc = $request->input('desc', 'Payment');
-
-    $payload = [
-        "BusinessShortCode" => $this->shortcode,
-        "Password" => $password,
-        "Timestamp" => $timestamp,
-        "TransactionType" => "CustomerPayBillOnline",
-        "Amount" => (int) $request->amount,
-        "PartyA" => $request->phone,
-        "PartyB" => $this->shortcode,
-        "PhoneNumber" => $request->phone,
-        "CallBackURL" => "https://lumendeotv-project-backend.onrender.com/api/callback",
-        "AccountReference" => $accountRef,
-        "TransactionDesc" => $transactionDesc,
-    ];
-
-    $stkPushUrl = "{$this->baseUrl}/mpesa/stkpush/v1/processrequest";
-
-    try {
-        $stkResponse = Http::withToken($accessToken)
-            ->timeout(30)
-            ->post($stkPushUrl, $payload);
-
-        if (!$stkResponse->ok()) {
-            Log::error('STK Push failed', [
-                'response' => $stkResponse->json(),
-                'status' => $stkResponse->status(),
-            ]);
-            return response()->json([
-                'status' => 'error',
-                'message' => 'STK Push initiation failed',
-                'details' => $stkResponse->json(),
-            ], 500);
+        $accessToken = $this->getAccessToken();
+        if (!$accessToken) {
+            return response()->json(['status' => 'error', 'message' => 'Failed to get access token'], 500);
         }
 
-        $responseData = $stkResponse->json();
+        $timestamp = now()->format('YmdHis');
+        $password = base64_encode($this->shortcode . $this->passkey . $timestamp);
 
-        // Save the STK Push attempt to the database
-        MpesaPayment::create([
-            'merchant_request_id' => $responseData['MerchantRequestID'] ?? null,
-            'checkout_request_id' => $responseData['CheckoutRequestID'] ?? null,
-            'amount' => $request->amount,
-            'phone_number' => $request->phone,
-            'account_reference' => $accountRef,
-            'transaction_desc' => $transactionDesc,
-            'status' => 'PENDING',
-            'response' => json_encode($responseData),
-        ]);
+        $accountRef = $request->input('account_ref', 'PAYMENT_' . time());
+        $transactionDesc = $request->input('desc', 'Payment');
 
-        return response()->json([
-            'status' => 'success',
-            'message' => 'STK Push initiated successfully',
-            'data' => $responseData,
-        ]);
-    } catch (\Exception $e) {
-        Log::error('STK Push request error', ['message' => $e->getMessage()]);
-        return response()->json([
-            'status' => 'error',
-            'message' => 'STK Push error',
-            'details' => $e->getMessage(),
-        ], 500);
+        $payload = [
+            "BusinessShortCode" => $this->shortcode,
+            "Password" => $password,
+            "Timestamp" => $timestamp,
+            "TransactionType" => "CustomerPayBillOnline",
+            "Amount" => (int) $request->amount,
+            "PartyA" => $request->phone,
+            "PartyB" => $this->shortcode,
+            "PhoneNumber" => $request->phone,
+            "CallBackURL" => "https://lumendeotv-project-backend.onrender.com/api/callback",
+            "AccountReference" => $accountRef,
+            "TransactionDesc" => $transactionDesc,
+        ];
+
+        $stkPushUrl = "{$this->baseUrl}/mpesa/stkpush/v1/processrequest";
+
+        try {
+            $stkResponse = Http::withToken($accessToken)
+                ->timeout(30)
+                ->post($stkPushUrl, $payload);
+
+            if (!$stkResponse->ok()) {
+                Log::error('STK Push failed', [
+                    'response' => $stkResponse->json(),
+                    'status' => $stkResponse->status(),
+                ]);
+                return response()->json([
+                    'status' => 'error',
+                    'message' => 'STK Push initiation failed',
+                    'details' => $stkResponse->json(),
+                ], 500);
+            }
+
+            $responseData = $stkResponse->json();
+
+            MpesaPayment::create([
+                'merchant_request_id' => $responseData['MerchantRequestID'] ?? null,
+                'checkout_request_id' => $responseData['CheckoutRequestID'] ?? null,
+                'amount' => $request->amount,
+                'phone_number' => $request->phone,
+                'account_reference' => $accountRef,
+                'transaction_desc' => $transactionDesc,
+                'status' => 'PENDING',
+                'response' => json_encode($responseData),
+            ]);
+
+            return response()->json([
+                'status' => 'success',
+                'message' => 'STK Push initiated successfully',
+                'data' => $responseData,
+            ]);
+        } catch (\Exception $e) {
+            Log::error('STK Push request error', ['message' => $e->getMessage()]);
+            return response()->json([
+                'status' => 'error',
+                'message' => 'STK Push error',
+                'details' => $e->getMessage(),
+            ], 500);
+        }
     }
-}
 
     public function handleCallback(Request $request)
     {
@@ -160,32 +159,46 @@ class MpesaController extends Controller
                 }
             }
 
-            // Save with status PENDING first
-            $payment = MpesaPayment::create([
-                'merchant_request_id' => $merchantRequestId,
-                'checkout_request_id' => $checkoutRequestId,
-                'result_code' => $resultCode,
-                'result_desc' => $resultDesc,
-                'amount' => $data['Amount'] ?? null,
-                'mpesa_receipt_number' => $data['MpesaReceiptNumber'] ?? null,
-                'transaction_date' => isset($data['TransactionDate']) ? Carbon::createFromFormat('YmdHis', $data['TransactionDate']) : null,
-                'phone_number' => $data['PhoneNumber'] ?? null,
-                'status' => 'PENDING',
-                'failure_reason' => null,
-                'paid_at' => null,
-                'response' => json_encode($request->all()),
-            ]);
+            $payment = MpesaPayment::where('merchant_request_id', $merchantRequestId)->first();
 
-            // Update status based on resultCode
-            if ($resultCode == 0) {
+            if ($payment) {
                 $payment->update([
-                    'status' => 'COMPLETED',
-                    'paid_at' => now(),
+                    'checkout_request_id' => $checkoutRequestId,
+                    'result_code' => $resultCode,
+                    'result_desc' => $resultDesc,
+                    'amount' => $data['Amount'] ?? $payment->amount,
+                    'mpesa_receipt_number' => $data['MpesaReceiptNumber'] ?? null,
+                    'transaction_date' => isset($data['TransactionDate']) ? Carbon::createFromFormat('YmdHis', $data['TransactionDate']) : null,
+                    'phone_number' => $data['PhoneNumber'] ?? $payment->phone_number,
+                    'response' => json_encode($request->all()),
                 ]);
+
+                if ($resultCode == 0) {
+                    $payment->update([
+                        'status' => 'COMPLETED',
+                        'paid_at' => now(),
+                    ]);
+                } else {
+                    $payment->update([
+                        'status' => 'FAILED',
+                        'failure_reason' => $resultDesc,
+                    ]);
+                }
+
             } else {
-                $payment->update([
-                    'status' => 'FAILED',
-                    'failure_reason' => $resultDesc,
+                MpesaPayment::create([
+                    'merchant_request_id' => $merchantRequestId,
+                    'checkout_request_id' => $checkoutRequestId,
+                    'result_code' => $resultCode,
+                    'result_desc' => $resultDesc,
+                    'amount' => $data['Amount'] ?? null,
+                    'mpesa_receipt_number' => $data['MpesaReceiptNumber'] ?? null,
+                    'transaction_date' => isset($data['TransactionDate']) ? Carbon::createFromFormat('YmdHis', $data['TransactionDate']) : null,
+                    'phone_number' => $data['PhoneNumber'] ?? null,
+                    'status' => $resultCode == 0 ? 'COMPLETED' : 'FAILED',
+                    'failure_reason' => $resultCode == 0 ? null : $resultDesc,
+                    'paid_at' => $resultCode == 0 ? now() : null,
+                    'response' => json_encode($request->all()),
                 ]);
             }
 
