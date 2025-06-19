@@ -79,7 +79,7 @@ class MpesaController extends Controller
         "PartyA" => $request->phone,
         "PartyB" => $this->shortcode,
         "PhoneNumber" => $request->phone,
-        "CallBackURL" => "https://lumendeotv-project-backend.onrender.com/api/mpesa/callback",
+        "CallBackURL" => "https://lumendeotv-project-backend.onrender.com/api/callback",
         "AccountReference" => $accountRef,
         "TransactionDesc" => $transactionDesc,
     ];
