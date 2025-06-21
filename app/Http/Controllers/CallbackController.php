@@ -24,98 +24,62 @@ class CallbackController extends Controller
     
         Log::info('Callback received', ['callback_data' => $data]);
     
-        // Cache the raw callback data for debugging
+        // Save to cache (your existing logic)
         $callbacks = Cache::get($this->cacheKey, []);
+    
         $callbacks[] = [
             'data' => $data,
             'timestamp' => now()->timestamp,
             'received_at' => now()->toIso8601String(),
         ];
+    
         Cache::put($this->cacheKey, $callbacks, now()->addHours(1));
     
-        try {
-            $body = data_get($data, 'Body.stkCallback');
+        // --- DB Update starts here ---
     
-            if (empty($body)) {
-                Log::warning('Invalid or empty callback data');
-                return response()->json([
-                    'ResultCode' => 1,
-                    'ResultDesc' => 'Invalid or empty callback data',
-                ]);
-            }
-    
+        $body = $data['Body']['stkCallback'] ?? null;
+        if ($body) {
             $merchantRequestId = $body['MerchantRequestID'] ?? null;
             $checkoutRequestId = $body['CheckoutRequestID'] ?? null;
             $resultCode = $body['ResultCode'] ?? null;
             $resultDesc = $body['ResultDesc'] ?? null;
     
             $callbackMetadata = $body['CallbackMetadata']['Item'] ?? [];
-            $metaDataMap = [];
+            $metaDataArr = [];
             foreach ($callbackMetadata as $item) {
                 if (isset($item['Name'], $item['Value'])) {
-                    $metaDataMap[$item['Name']] = $item['Value'];
+                    $metaDataArr[$item['Name']] = $item['Value'];
                 }
             }
     
-            $payment = MpesaPayment::where('merchant_request_id', $merchantRequestId)->first();
+            $payment = MpesaPayment::firstOrNew(['merchant_request_id' => $merchantRequestId]);
     
-            if ($payment) {
-                $payment->update([
-                    'checkout_request_id' => $checkoutRequestId,
-                    'result_code' => $resultCode,
-                    'result_desc' => $resultDesc,
-                    'amount' => $metaDataMap['Amount'] ?? $payment->amount,
-                    'mpesa_receipt_number' => $metaDataMap['MpesaReceiptNumber'] ?? null,
-                    'transaction_date' => isset($metaDataMap['TransactionDate']) 
-                        ? Carbon::createFromFormat('YmdHis', $metaDataMap['TransactionDate']) 
-                        : null,
-                    'phone_number' => $metaDataMap['PhoneNumber'] ?? $payment->phone_number,
-                    'response' => json_encode($data),
-                ]);
-    
-                if ($resultCode == 0) {
-                    $payment->update([
-                        'status' => 'COMPLETED',
-                        'paid_at' => now(),
-                    ]);
-                } else {
-                    $payment->update([
-                        'status' => 'FAILED',
-                        'failure_reason' => $resultDesc,
-                    ]);
-                }
-            } else {
-                MpesaPayment::create([
-                    'merchant_request_id' => $merchantRequestId,
-                    'checkout_request_id' => $checkoutRequestId,
-                    'result_code' => $resultCode,
-                    'result_desc' => $resultDesc,
-                    'amount' => $metaDataMap['Amount'] ?? null,
-                    'mpesa_receipt_number' => $metaDataMap['MpesaReceiptNumber'] ?? null,
-                    'transaction_date' => isset($metaDataMap['TransactionDate']) 
-                        ? Carbon::createFromFormat('YmdHis', $metaDataMap['TransactionDate']) 
-                        : null,
-                    'phone_number' => $metaDataMap['PhoneNumber'] ?? null,
-                    'status' => $resultCode == 0 ? 'COMPLETED' : 'FAILED',
-                    'failure_reason' => $resultCode == 0 ? null : $resultDesc,
-                    'paid_at' => $resultCode == 0 ? now() : null,
-                    'response' => json_encode($data),
-                ]);
+            $payment->checkout_request_id = $checkoutRequestId;
+            $payment->result_code = $resultCode;
+            $payment->result_desc = $resultDesc;
+            $payment->amount = $metaDataArr['Amount'] ?? $payment->amount;
+            $payment->mpesa_receipt_number = $metaDataArr['MpesaReceiptNumber'] ?? $payment->mpesa_receipt_number;
+            $payment->transaction_date = isset($metaDataArr['TransactionDate'])
+                ? Carbon::createFromFormat('YmdHis', $metaDataArr['TransactionDate'])
+                : $payment->transaction_date;
+            $payment->phone_number = $metaDataArr['PhoneNumber'] ?? $payment->phone_number;
+            $payment->response = json_encode($data);
+            $payment->status = ($resultCode == 0) ? 'COMPLETED' : 'FAILED';
+            $payment->failure_reason = ($resultCode == 0) ? null : $resultDesc;
+            if ($resultCode == 0) {
+                $payment->paid_at = now();
             }
-    
-            return response()->json([
-                'ResultCode' => 0,
-                'ResultDesc' => 'C2B Received Successfully',
-            ]);
-        } catch (\Exception $e) {
-            Log::error('Mpesa callback processing error', ['message' => $e->getMessage()]);
-            return response()->json([
-                'ResultCode' => 1,
-                'ResultDesc' => 'Server error during callback processing',
-            ]);
+            $payment->save();
         }
-    }    
-
+    
+        // --- DB Update ends here ---
+    
+        return response()->json([
+            'status' => 'success',
+            'message' => 'Callback received',
+        ]);
+    }
+    
     public function checkCallback()
     {
         $now = now()->timestamp;
