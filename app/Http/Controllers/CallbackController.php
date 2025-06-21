@@ -15,69 +15,70 @@ class CallbackController extends Controller
 
     public function receiveCallback(Request $request)
     {
-        $data = $request->json()->all();
-    
-        if (empty($data)) {
-            Log::warning('Callback received with empty JSON data');
-            return response()->json(['error' => 'No JSON data received'], 400);
+        // Step 1: Immediately acknowledge Safaricom (must be fast)
+        response()->json(['ResultCode' => 0, 'ResultDesc' => 'Callback received successfully'])->send();
+        if (function_exists('fastcgi_finish_request')) {
+            fastcgi_finish_request(); // Only works on PHP-FPM (e.g., in production)
         }
     
-        Log::info('Callback received', ['callback_data' => $data]);
+        // Step 2: Continue processing in background (logging, DB, cache)
+        try {
+            $data = $request->json()->all();
     
-        // Save to cache (your existing logic)
-        $callbacks = Cache::get($this->cacheKey, []);
+            if (empty($data)) {
+                Log::warning('Callback received with empty JSON data');
+                return;
+            }
     
-        $callbacks[] = [
-            'data' => $data,
-            'timestamp' => now()->timestamp,
-            'received_at' => now()->toIso8601String(),
-        ];
+            Log::info('Callback received', ['callback_data' => $data]);
     
-        Cache::put($this->cacheKey, $callbacks, now()->addHours(1));
+            // Save to cache
+            $callbacks = Cache::get($this->cacheKey, []);
+            $callbacks[] = [
+                'data' => $data,
+                'timestamp' => now()->timestamp,
+                'received_at' => now()->toIso8601String(),
+            ];
+            Cache::put($this->cacheKey, $callbacks, now()->addHours(1));
     
-        // --- DB Update starts here ---
+            // --- DB Update ---
+            $body = $data['Body']['stkCallback'] ?? null;
+            if ($body) {
+                $merchantRequestId = $body['MerchantRequestID'] ?? null;
+                $checkoutRequestId = $body['CheckoutRequestID'] ?? null;
+                $resultCode = $body['ResultCode'] ?? null;
+                $resultDesc = $body['ResultDesc'] ?? null;
     
-        $body = $data['Body']['stkCallback'] ?? null;
-        if ($body) {
-            $merchantRequestId = $body['MerchantRequestID'] ?? null;
-            $checkoutRequestId = $body['CheckoutRequestID'] ?? null;
-            $resultCode = $body['ResultCode'] ?? null;
-            $resultDesc = $body['ResultDesc'] ?? null;
-    
-            $callbackMetadata = $body['CallbackMetadata']['Item'] ?? [];
-            $metaDataArr = [];
-            foreach ($callbackMetadata as $item) {
-                if (isset($item['Name'], $item['Value'])) {
-                    $metaDataArr[$item['Name']] = $item['Value'];
+                $callbackMetadata = $body['CallbackMetadata']['Item'] ?? [];
+                $metaDataArr = [];
+                foreach ($callbackMetadata as $item) {
+                    if (isset($item['Name'], $item['Value'])) {
+                        $metaDataArr[$item['Name']] = $item['Value'];
+                    }
                 }
-            }
     
-            $payment = MpesaPayment::firstOrNew(['merchant_request_id' => $merchantRequestId]);
+                $payment = MpesaPayment::firstOrNew(['merchant_request_id' => $merchantRequestId]);
     
-            $payment->checkout_request_id = $checkoutRequestId;
-            $payment->result_code = $resultCode;
-            $payment->result_desc = $resultDesc;
-            $payment->amount = $metaDataArr['Amount'] ?? $payment->amount;
-            $payment->mpesa_receipt_number = $metaDataArr['MpesaReceiptNumber'] ?? $payment->mpesa_receipt_number;
-            $payment->transaction_date = isset($metaDataArr['TransactionDate'])
-                ? Carbon::createFromFormat('YmdHis', $metaDataArr['TransactionDate'])
-                : $payment->transaction_date;
-            $payment->phone_number = $metaDataArr['PhoneNumber'] ?? $payment->phone_number;
-            $payment->response = json_encode($data);
-            $payment->status = ($resultCode == 0) ? 'COMPLETED' : 'FAILED';
-            $payment->failure_reason = ($resultCode == 0) ? null : $resultDesc;
-            if ($resultCode == 0) {
-                $payment->paid_at = now();
+                $payment->checkout_request_id = $checkoutRequestId;
+                $payment->result_code = $resultCode;
+                $payment->result_desc = $resultDesc;
+                $payment->amount = $metaDataArr['Amount'] ?? $payment->amount;
+                $payment->mpesa_receipt_number = $metaDataArr['MpesaReceiptNumber'] ?? $payment->mpesa_receipt_number;
+                $payment->transaction_date = isset($metaDataArr['TransactionDate'])
+                    ? Carbon::createFromFormat('YmdHis', $metaDataArr['TransactionDate'])
+                    : $payment->transaction_date;
+                $payment->phone_number = $metaDataArr['PhoneNumber'] ?? $payment->phone_number;
+                $payment->response = json_encode($data);
+                $payment->status = ($resultCode == 0) ? 'COMPLETED' : 'FAILED';
+                $payment->failure_reason = ($resultCode == 0) ? null : $resultDesc;
+                if ($resultCode == 0) {
+                    $payment->paid_at = now();
+                }
+                $payment->save();
             }
-            $payment->save();
+        } catch (\Throwable $e) {
+            Log::error('Error while handling callback', ['error' => $e->getMessage()]);
         }
-    
-        // --- DB Update ends here ---
-    
-        return response()->json([
-            'status' => 'success',
-            'message' => 'Callback received',
-        ]);
     }
     
     public function checkCallback()
