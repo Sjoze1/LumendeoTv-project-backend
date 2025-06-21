@@ -16,14 +16,9 @@ Route::delete('/videos/{id}', [VideoController::class, 'destroy']);
 Route::post('/upload', [VideoController::class, 'store']);
 Route::get('/videos/stream/{filename}', [VideoController::class, 'streamVideo']);
 
-// Initiates STK push
 Route::post('/mpesa/stkpush', [MpesaController::class, 'initiateStkPush']);
 
-// Handle M-Pesa callback and update DB
-Route::post('/callback', [MpesaController::class, 'handleCallback']);
-
-// Optional test/debug routes (if you still want them)
-Route::post('/test-callback', [CallbackController::class, 'receiveCallback']);
+Route::post('/callback', [CallbackController::class, 'receiveCallback']);
 Route::get('/check-callback', [CallbackController::class, 'checkCallback']);
 
 
