@@ -5,91 +5,65 @@ namespace App\Http\Controllers;
 use App\Models\Video;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
-use Symfony\Component\HttpFoundation\StreamedResponse;
 
 class VideoController extends Controller
 {
     public function index()
     {
-        return response()->json(Video::latest()->get());
+        /** @var \Illuminate\Filesystem\FilesystemAdapter $disk */
+        $disk = Storage::disk('b2');
+
+        $videos = Video::latest()->get()->map(function ($video) use ($disk) {
+            $video->thumbnail_url = $disk->temporaryUrl($video->thumbnail_url, now()->addMinutes(30));
+            $video->trailer_url = $disk->temporaryUrl($video->trailer_url, now()->addMinutes(30));
+            $video->full_video_url = $disk->temporaryUrl($video->full_video_url, now()->addMinutes(30));
+            return $video;
+        });
+
+        return response()->json($videos);
     }
-
-    public function streamVideo($filename)
-{
-    $path = storage_path("app/public/videos/{$filename}");
-
-    if (!file_exists($path)) {
-        return response()->json(['error' => 'File not found.'], 404);
-    }
-
-    $stream = function () use ($path) {
-        $file = fopen($path, 'rb');
-        $size = filesize($path);
-
-        $start = 0;
-        $end = $size - 1;
-
-        if (isset($_SERVER['HTTP_RANGE'])) {
-            if (preg_match('/bytes=(\d+)-(\d*)/', $_SERVER['HTTP_RANGE'], $matches)) {
-                $start = intval($matches[1]);
-                if (!empty($matches[2])) {
-                    $end = intval($matches[2]);
-                }
-            }
-        }
-
-        $length = $end - $start + 1;
-
-        header("Content-Type: video/mp4");
-        header("Accept-Ranges: bytes");
-        header("Content-Length: $length");
-        header("Content-Range: bytes $start-$end/$size");
-
-        fseek($file, $start);
-
-        $bufferSize = 1024 * 8; // 8KB buffer
-        while (!feof($file) && ($pos = ftell($file)) <= $end) {
-            if ($pos + $bufferSize > $end) {
-                $bufferSize = $end - $pos + 1;
-            }
-            echo fread($file, $bufferSize);
-            flush();
-        }
-
-        fclose($file);
-    };
-
-    return response()->stream($stream, 206, [
-        'Content-Type' => 'video/mp4',
-        'Accept-Ranges' => 'bytes',
-    ]);
-}
 
     public function latest()
     {
+        /** @var \Illuminate\Filesystem\FilesystemAdapter $disk */
+        $disk = Storage::disk('b2');
+
         $video = Video::latest()->first();
 
         if (!$video) {
             return response()->json(['error' => 'No video found'], 404);
         }
 
+        $video->thumbnail_url = $disk->temporaryUrl($video->thumbnail_url, now()->addMinutes(30));
+        $video->trailer_url = $disk->temporaryUrl($video->trailer_url, now()->addMinutes(30));
+        $video->full_video_url = $disk->temporaryUrl($video->full_video_url, now()->addMinutes(30));
+
         return response()->json($video);
     }
 
     public function show($id)
     {
+        /** @var \Illuminate\Filesystem\FilesystemAdapter $disk */
+        $disk = Storage::disk('b2');
+
         $video = Video::find($id);
 
         if (!$video) {
             return response()->json(['error' => 'Video not found'], 404);
         }
 
+        $video->thumbnail_url = $disk->temporaryUrl($video->thumbnail_url, now()->addMinutes(30));
+        $video->trailer_url = $disk->temporaryUrl($video->trailer_url, now()->addMinutes(30));
+        $video->full_video_url = $disk->temporaryUrl($video->full_video_url, now()->addMinutes(30));
+
         return response()->json($video);
     }
 
     public function store(Request $request)
     {
-        // If uploading files
+        /** @var \Illuminate\Filesystem\FilesystemAdapter $disk */
+        $disk = Storage::disk('b2');
+
         if ($request->hasFile('trailer') && $request->hasFile('full_video') && $request->hasFile('thumbnail')) {
             $request->validate([
                 'title' => 'required|string|max:255',
@@ -99,37 +73,48 @@ class VideoController extends Controller
                 'thumbnail' => 'required|image',
             ]);
 
-            $trailerPath = $request->file('trailer')->store('videos', 'public');
-            $fullPath = $request->file('full_video')->store('videos', 'public');
-            $thumbPath = $request->file('thumbnail')->store('thumbs', 'public');            
+            $trailerPath = $request->file('trailer')->store('videos', 'b2');
+            $fullPath = $request->file('full_video')->store('videos', 'b2');
+            $thumbPath = $request->file('thumbnail')->store('thumbs', 'b2');
 
             $video = Video::create([
                 'title' => $request->title,
                 'description' => $request->description,
-                'thumbnail_url' => Storage::url($thumbPath),
-                'trailer_url' => Storage::url($trailerPath),
-                'full_video_url' => Storage::url($fullPath),
+                'thumbnail_url' => $thumbPath,
+                'trailer_url' => $trailerPath,
+                'full_video_url' => $fullPath,
             ]);
+
+            // Return signed URLs for immediate use
+            $video->thumbnail_url = $disk->temporaryUrl($thumbPath, now()->addMinutes(30));
+            $video->trailer_url = $disk->temporaryUrl($trailerPath, now()->addMinutes(30));
+            $video->full_video_url = $disk->temporaryUrl($fullPath, now()->addMinutes(30));
 
             return response()->json($video, 201);
         }
 
-        // If JSON URLs are sent instead
         $validated = $request->validate([
             'title' => 'required|string|max:255',
             'description' => 'required|string',
-            'thumbnail_url' => 'required|url',
-            'trailer_url' => 'required|url',
-            'full_video_url' => 'required|url',
+            'thumbnail_url' => 'required|string',
+            'trailer_url' => 'required|string',
+            'full_video_url' => 'required|string',
         ]);
 
         $video = Video::create($validated);
+
+        $video->thumbnail_url = $disk->temporaryUrl($video->thumbnail_url, now()->addMinutes(30));
+        $video->trailer_url = $disk->temporaryUrl($video->trailer_url, now()->addMinutes(30));
+        $video->full_video_url = $disk->temporaryUrl($video->full_video_url, now()->addMinutes(30));
 
         return response()->json($video, 201);
     }
 
     public function update(Request $request, $id)
     {
+        /** @var \Illuminate\Filesystem\FilesystemAdapter $disk */
+        $disk = Storage::disk('b2');
+
         $video = Video::find($id);
 
         if (!$video) {
@@ -139,23 +124,37 @@ class VideoController extends Controller
         $validated = $request->validate([
             'title' => 'sometimes|string|max:255',
             'description' => 'sometimes|string',
-            'thumbnail_url' => 'sometimes|url',
-            'trailer_url' => 'sometimes|url',
-            'full_video_url' => 'sometimes|url',
+            'thumbnail_url' => 'sometimes|string',
+            'trailer_url' => 'sometimes|string',
+            'full_video_url' => 'sometimes|string',
         ]);
 
         $video->update($validated);
+
+        $video->thumbnail_url = $disk->temporaryUrl($video->thumbnail_url, now()->addMinutes(30));
+        $video->trailer_url = $disk->temporaryUrl($video->trailer_url, now()->addMinutes(30));
+        $video->full_video_url = $disk->temporaryUrl($video->full_video_url, now()->addMinutes(30));
 
         return response()->json($video);
     }
 
     public function destroy($id)
     {
+        /** @var \Illuminate\Filesystem\FilesystemAdapter $disk */
+        $disk = Storage::disk('b2');
+
         $video = Video::find($id);
 
         if (!$video) {
             return response()->json(['error' => 'Video not found'], 404);
         }
+
+        // Delete files from B2 storage
+        $disk->delete([
+            $video->thumbnail_url,
+            $video->trailer_url,
+            $video->full_video_url,
+        ]);
 
         $video->delete();
 
