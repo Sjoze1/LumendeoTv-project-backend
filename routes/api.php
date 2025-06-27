@@ -15,7 +15,7 @@ Route::post('/videos', [VideoController::class, 'store']);
 Route::put('/videos/{id}', [VideoController::class, 'update']);
 Route::delete('/videos/{id}', [VideoController::class, 'destroy']);
 Route::post('/upload', [VideoController::class, 'store']);
-Route::get('/videos/stream/{filename}', [VideoController::class, 'streamVideo']);
+Route::get('/videos/stream/{filename}', [VideoController::class, 'stream']);
 
 Route::post('/mpesa/stkpush', [MpesaController::class, 'initiateStkPush']);
 

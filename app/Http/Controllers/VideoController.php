@@ -175,20 +175,20 @@ class VideoController extends Controller
         return response()->json(['message' => 'Video deleted']);
     }
 
-    public function streamVideo($filename)
-{
-    /** @var \Illuminate\Filesystem\FilesystemAdapter $disk */
-    $disk = Storage::disk('b2');
-
-    $path = "videos/{$filename}";
-
-    if (!$disk->exists($path)) {
-        return response()->json(['error' => 'File not found'], 404);
-    }
-
-    $temporaryUrl = $disk->temporaryUrl($path, now()->addMinutes(30));
-
-    return response()->json(['url' => $temporaryUrl]);
-}
-
+    public function stream($filename)
+    {
+        /** @var \Illuminate\Filesystem\FilesystemAdapter $disk */
+        $disk = Storage::disk('b2');
+    
+        $path = "videos/{$filename}";
+    
+        if (!$disk->exists($path)) {
+            return response()->json(['error' => 'File not found'], 404);
+        }
+    
+        /** @noinspection PhpUndefinedMethodInspection */
+        $signedUrl = $disk->temporaryUrl($path, now()->addMinutes(30));
+    
+        return response()->json(['url' => $signedUrl]);
+    }    
 }
