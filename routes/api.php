@@ -6,6 +6,7 @@ use App\Http\Controllers\MpesaController;
 use App\Http\Controllers\CallbackController;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Storage;
 
 Route::get('/videos', [VideoController::class, 'index']);
 Route::get('/videos/latest', [VideoController::class, 'latest']);
@@ -43,4 +44,10 @@ Route::get('/run-migrations', function (Request $request) {
           'trace' => $e->getTraceAsString()
       ], 500);
   }
+});
+
+Route::get('/test-b2', function () {
+    $disk = Storage::disk('b2');
+    $result = $disk->put('test.txt', 'It works!');
+    return $result ? 'Success: File uploaded to B2!' : 'Failed to upload.';
 });

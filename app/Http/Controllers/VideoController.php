@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Models\Video;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Facades\Log;
 
 class VideoController extends Controller
 {
@@ -61,9 +62,8 @@ class VideoController extends Controller
 
     public function store(Request $request)
     {
-        /** @var \Illuminate\Filesystem\FilesystemAdapter $disk */
         $disk = Storage::disk('b2');
-
+    
         if ($request->hasFile('trailer') && $request->hasFile('full_video') && $request->hasFile('thumbnail')) {
             $request->validate([
                 'title' => 'required|string|max:255',
@@ -72,11 +72,18 @@ class VideoController extends Controller
                 'full_video' => 'required|file|mimes:mp4',
                 'thumbnail' => 'required|image',
             ]);
-
+    
+            // Store files on B2 disk and get paths
             $trailerPath = $request->file('trailer')->store('videos', 'b2');
             $fullPath = $request->file('full_video')->store('videos', 'b2');
             $thumbPath = $request->file('thumbnail')->store('thumbs', 'b2');
-
+    
+            Log::info('Stored file paths:', [
+                'thumbnail' => $thumbPath,
+                'trailer' => $trailerPath,
+                'full_video' => $fullPath,
+            ]);
+    
             $video = Video::create([
                 'title' => $request->title,
                 'description' => $request->description,
@@ -84,32 +91,39 @@ class VideoController extends Controller
                 'trailer_url' => $trailerPath,
                 'full_video_url' => $fullPath,
             ]);
-
-            // Return signed URLs for immediate use
-            $video->thumbnail_url = $disk->temporaryUrl($thumbPath, now()->addMinutes(30));
-            $video->trailer_url = $disk->temporaryUrl($trailerPath, now()->addMinutes(30));
-            $video->full_video_url = $disk->temporaryUrl($fullPath, now()->addMinutes(30));
-
+    
+            // Generate temporary URLs for response
+            $video->thumbnail_url = $this->generateTemporaryUrl($disk, $thumbPath);
+            $video->trailer_url = $this->generateTemporaryUrl($disk, $trailerPath);
+            $video->full_video_url = $this->generateTemporaryUrl($disk, $fullPath);
+    
             return response()->json($video, 201);
         }
-
+    
+        // When URLs are sent directly (no files), just save as-is without generating temp URLs
         $validated = $request->validate([
             'title' => 'required|string|max:255',
             'description' => 'required|string',
-            'thumbnail_url' => 'required|string',
-            'trailer_url' => 'required|string',
-            'full_video_url' => 'required|string',
+            'thumbnail_url' => 'required|string|url',
+            'trailer_url' => 'required|string|url',
+            'full_video_url' => 'required|string|url',
         ]);
-
+    
         $video = Video::create($validated);
-
-        $video->thumbnail_url = $disk->temporaryUrl($video->thumbnail_url, now()->addMinutes(30));
-        $video->trailer_url = $disk->temporaryUrl($video->trailer_url, now()->addMinutes(30));
-        $video->full_video_url = $disk->temporaryUrl($video->full_video_url, now()->addMinutes(30));
-
+    
+        // Since these are full URLs already, just return them as is
         return response()->json($video, 201);
-    }
-
+    }    
+    
+    // helper method:
+    private function generateTemporaryUrl($disk, $path)
+    {
+        if (!$path || !$disk->exists($path)) {
+            return null;
+        }
+        return $disk->temporaryUrl($path, now()->addMinutes(30));
+    }    
+    
     public function update(Request $request, $id)
     {
         /** @var \Illuminate\Filesystem\FilesystemAdapter $disk */
