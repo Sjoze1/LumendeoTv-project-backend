@@ -1,15 +1,10 @@
 <?php
 
+// config/cloudinary.php
+
 return [
-    'cloud_url' => env('CLOUDINARY_URL'), // REQUIRED for SDK to work
-
-    'upload_preset' => env('CLOUDINARY_UPLOAD_PRESET', null),
-
-    'cloud' => [
-        'cloud_name' => env('CLOUDINARY_CLOUD_NAME'),
-        'api_key'    => env('CLOUDINARY_API_KEY'),
-        'api_secret' => env('CLOUDINARY_API_SECRET'),
-    ],
-
-    'secure' => true,
+    'cloud_name' => env('CLOUDINARY_CLOUD_NAME'),
+    'api_key' => env('CLOUDINARY_API_KEY'),
+    'api_secret' => env('CLOUDINARY_API_SECRET'),
+    'url_signature' => env('CLOUDINARY_URL_SIGNATURE', false), // Defaults to false if not set in .env
 ];

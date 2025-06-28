@@ -12,5 +12,10 @@ class Video extends Model
         'thumbnail_url',
         'trailer_url',
         'full_video_url',
+        'cloudinary_public_ids',
+    ];
+
+    protected $casts = [
+        'cloudinary_public_ids' => 'array',
     ];
 }

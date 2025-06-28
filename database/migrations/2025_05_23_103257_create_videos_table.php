@@ -9,7 +9,7 @@ return new class extends Migration
     /**
      * Run the migrations.
      */
-    public function up()
+    public function up(): void // Use `void` for type hinting in newer Laravel versions
     {
         Schema::create('videos', function (Blueprint $table) {
             $table->id();
@@ -18,6 +18,9 @@ return new class extends Migration
             $table->string('thumbnail_url');
             $table->string('trailer_url');
             $table->string('full_video_url');
+            // Add the new column to store Cloudinary public IDs as JSON
+            $table->json('cloudinary_public_ids')->nullable(); // Can be null if data predates Cloudinary upload
+
             $table->timestamps();
         });
     }
