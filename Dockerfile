@@ -50,3 +50,10 @@ EXPOSE 80
 
 # Start Apache in the foreground
 CMD ["apache2-foreground"]
+
+# Copy Laravel files to container
+COPY . .
+
+# Debug: List views folder content to verify it's copied correctly
+RUN ls -la resources/views
+
