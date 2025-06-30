@@ -23,7 +23,7 @@ RUN apt-get update && apt-get install -y \
 # Install Composer from official composer image
 COPY --from=composer:latest /usr/bin/composer /usr/bin/composer
 
-# Copy Laravel project files to container
+# Copy Laravel project files
 COPY . .
 
 # TEMP: Copy .env.example to .env for build-time artisan commands
@@ -32,24 +32,24 @@ COPY .env.example .env
 # Install PHP dependencies without dev packages, optimize autoloader
 RUN composer install --no-dev --optimize-autoloader
 
-# Debug: list resources/views contents to verify views copied
-RUN ls -la resources/views
+# Ensure required Laravel directories exist
+RUN mkdir -p storage/framework/views
 
-# Generate app key and cache config, routes, views
-RUN php artisan key:generate && \
-    php artisan config:cache && \
-    php artisan route:cache
-    # php artisan view:cache
-
-# Fix permissions for Laravel storage and www-data user
+# Fix permissions for Laravel storage and cache directories
 RUN chown -R www-data:www-data /var/www/html && \
     chmod -R 755 /var/www/html/storage
+
+# Generate app key and cache config, routes, and views
+RUN php artisan key:generate && \
+    php artisan config:cache && \
+    php artisan route:cache && \
+    php artisan view:cache
 
 # Configure Apache to serve Laravel from /public folder
 RUN sed -i 's|DocumentRoot /var/www/html|DocumentRoot /var/www/html/public|g' /etc/apache2/sites-available/000-default.conf
 
-# Expose port 80 for web traffic
+# Expose port 80
 EXPOSE 80
 
-# Start Apache in foreground
+# Start Apache in the foreground
 CMD ["apache2-foreground"]
