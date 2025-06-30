@@ -50,14 +50,15 @@ class VideoController extends Controller
             $request->validate([
                 'title' => 'required|string|max:255',
                 'description' => 'required|string',
-                'trailer' => 'required|file|mimes:mp4,mov,avi,wmv,flv,webm|max:102400', // 100MB
-                'full_video' => 'required|file|mimes:mp4,mov,avi,wmv,flv,webm|max:102400', // 100MB
+                'trailer' => 'required|file|mimes:mp4,mov,avi,wmv,flv,webm|max:102400', // 100MB for trailer
+                'full_video' => 'required|file|mimes:mp4,mov,avi,wmv,flv,webm|max:5120000', // ~5GB max for full video (adjust as needed)
                 'thumbnail' => 'required|image|max:10240', // 10MB
             ]);
-
+    
             try {
                 $uploadApi = new UploadApi();
-
+    
+                // Upload thumbnail to Cloudinary
                 $thumbnailFile = $request->file('thumbnail');
                 $thumbUploadResult = $uploadApi->upload(
                     $thumbnailFile->getRealPath(),
@@ -71,7 +72,8 @@ class VideoController extends Controller
                 );
                 $thumbnailUrl = $thumbUploadResult['secure_url'];
                 $thumbnailPublicId = $thumbUploadResult['public_id'];
-
+    
+                // Upload trailer to Cloudinary
                 $trailerFile = $request->file('trailer');
                 $trailerUploadResult = $uploadApi->upload(
                     $trailerFile->getRealPath(),
@@ -85,44 +87,50 @@ class VideoController extends Controller
                 );
                 $trailerUrl = $trailerUploadResult['secure_url'];
                 $trailerPublicId = $trailerUploadResult['public_id'];
-
+    
+                // Store full video temporarily on server
                 $fullVideoFile = $request->file('full_video');
-                $fullVideoUploadResult = $uploadApi->upload(
-                    $fullVideoFile->getRealPath(),
-                    [
-                        'resource_type' => 'video',
-                        'folder' => 'artful_kenya_full_videos',
-                        'public_id' => 'full_video_' . uniqid() . '_' . pathinfo($fullVideoFile->getClientOriginalName(), PATHINFO_FILENAME),
-                        'eager' => [['format' => 'mp4', 'quality' => 'auto:eco', 'fetch_format' => 'auto']],
-                        'eager_async' => true,
-                    ]
-                );
-                $fullVideoUrl = $fullVideoUploadResult['secure_url'];
-                $fullVideoPublicId = $fullVideoUploadResult['public_id'];
-
+                $tempFullVideoPath = $fullVideoFile->store('temp');
+                $fullVideoLocalPath = storage_path('app/' . $tempFullVideoPath);
+                $filename = basename($fullVideoLocalPath);
+    
+                // Upload full video to Mega using megacmd
+                $uploadCommand = "mega-put \"$fullVideoLocalPath\" /Videos 2>&1";
+                $uploadOutput = shell_exec($uploadCommand);
+    
+                // Get public share link from Mega
+                $linkCommand = "mega-export -a /Videos/$filename 2>&1";
+                $megaShareLink = trim(shell_exec($linkCommand));
+    
+                // Delete temp file after upload
+                unlink($fullVideoLocalPath);
+    
+                // Save record to DB
                 $video = Video::create([
                     'title' => $request->title,
                     'description' => $request->description,
                     'thumbnail_url' => $thumbnailUrl,
                     'trailer_url' => $trailerUrl,
-                    'full_video_url' => $fullVideoUrl,
+                    'full_video_url' => $megaShareLink,
                     'cloudinary_public_ids' => json_encode([
                         'thumbnail' => $thumbnailPublicId,
                         'trailer' => $trailerPublicId,
-                        'full_video' => $fullVideoPublicId,
                     ]),
                 ]);
-
+    
                 return response()->json($video, 201);
-
+    
             } catch (\Exception $e) {
-                Log::error('Cloudinary upload error in store method: ' . $e->getMessage(), [
-                    'file' => $e->getFile(), 'line' => $e->getLine(), 'trace' => $e->getTraceAsString(),
+                Log::error('Upload error in store method: ' . $e->getMessage(), [
+                    'file' => $e->getFile(),
+                    'line' => $e->getLine(),
+                    'trace' => $e->getTraceAsString(),
                 ]);
                 return response()->json(['error' => 'Failed to upload media. ' . $e->getMessage()], 500);
             }
         }
-
+    
+        // Fallback: accept direct URLs if no files are uploaded (optional)
         $validated = $request->validate([
             'title' => 'required|string|max:255',
             'description' => 'required|string',
@@ -131,10 +139,11 @@ class VideoController extends Controller
             'full_video_url' => 'required|url',
             'cloudinary_public_ids' => 'sometimes|json',
         ]);
-
+    
         $video = Video::create($validated);
         return response()->json($video, 201);
     }
+    
 
     public function update(Request $request, $id)
     {
