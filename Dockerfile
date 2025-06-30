@@ -39,7 +39,7 @@ RUN ls -la resources/views
 RUN php artisan key:generate && \
     php artisan config:cache && \
     php artisan route:cache && \
-    php artisan view:cache
+    # php artisan view:cache
 
 # Fix permissions for Laravel storage and www-data user
 RUN chown -R www-data:www-data /var/www/html && \
