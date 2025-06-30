@@ -20,17 +20,20 @@ RUN apt-get update && apt-get install -y \
     libpq-dev \
     && docker-php-ext-install pdo pdo_mysql pdo_pgsql mbstring zip exif pcntl
 
-# Install Composer
+# Install Composer from official composer image
 COPY --from=composer:latest /usr/bin/composer /usr/bin/composer
 
-# Copy Laravel files to container
+# Copy Laravel project files to container
 COPY . .
 
-# 🔥 TEMPORARY: Copy .env.example as .env for build-time artisan commands
+# TEMP: Copy .env.example to .env for build-time artisan commands
 COPY .env.example .env
 
-# Install PHP dependencies
+# Install PHP dependencies without dev packages, optimize autoloader
 RUN composer install --no-dev --optimize-autoloader
+
+# Debug: list resources/views contents to verify views copied
+RUN ls -la resources/views
 
 # Generate app key and cache config, routes, views
 RUN php artisan key:generate && \
@@ -38,22 +41,15 @@ RUN php artisan key:generate && \
     php artisan route:cache && \
     php artisan view:cache
 
-# Set permissions for Laravel
-RUN chown -R www-data:www-data /var/www/html \
-    && chmod -R 755 /var/www/html/storage
+# Fix permissions for Laravel storage and www-data user
+RUN chown -R www-data:www-data /var/www/html && \
+    chmod -R 755 /var/www/html/storage
 
-# Configure Apache to serve Laravel from /public
+# Configure Apache to serve Laravel from /public folder
 RUN sed -i 's|DocumentRoot /var/www/html|DocumentRoot /var/www/html/public|g' /etc/apache2/sites-available/000-default.conf
 
-# Expose port 80 to Render
+# Expose port 80 for web traffic
 EXPOSE 80
 
-# Start Apache in the foreground
+# Start Apache in foreground
 CMD ["apache2-foreground"]
-
-# Copy Laravel files to container
-COPY . .
-
-# Debug: List views folder content to verify it's copied correctly
-RUN ls -la resources/views
-
