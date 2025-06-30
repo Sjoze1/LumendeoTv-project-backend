@@ -37,7 +37,8 @@ RUN mkdir -p storage/framework/views storage/framework/cache/data bootstrap/cach
 
 # Set correct permissions
 RUN chown -R www-data:www-data /var/www/html && \
-    chmod -R 755 /var/www/html/storage
+    chmod -R 775 /var/www/html/storage && \
+    chmod -R 775 /var/www/html/bootstrap/cache
 
 # Laravel caching
 RUN php artisan key:generate && \
