@@ -26,6 +26,9 @@ COPY --from=composer:latest /usr/bin/composer /usr/bin/composer
 # Copy Laravel files to container
 COPY . .
 
+# 🔥 TEMPORARY: Copy .env.example as .env for build-time artisan commands
+COPY .env.example .env
+
 # Install PHP dependencies
 RUN composer install --no-dev --optimize-autoloader
 
