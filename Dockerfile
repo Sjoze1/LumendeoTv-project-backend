@@ -32,14 +32,14 @@ COPY .env.example .env
 # Install PHP dependencies without dev packages, optimize autoloader
 RUN composer install --no-dev --optimize-autoloader
 
-# Ensure required Laravel directories exist
-RUN mkdir -p storage/framework/views
+# Ensure Laravel required directories exist
+RUN mkdir -p storage/framework/views storage/framework/cache/data bootstrap/cache
 
-# Fix permissions for Laravel storage and cache directories
+# Set correct permissions
 RUN chown -R www-data:www-data /var/www/html && \
     chmod -R 755 /var/www/html/storage
 
-# Generate app key and cache config, routes, and views
+# Laravel caching
 RUN php artisan key:generate && \
     php artisan config:cache && \
     php artisan route:cache && \
