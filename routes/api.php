@@ -44,7 +44,7 @@ Route::delete('/videos/{id}', [VideoController::class, 'destroy']);
 Route::post('/mpesa/stkpush', [MpesaController::class, 'initiateStkPush']);
 Route::post('/callback', [CallbackController::class, 'receiveCallback']);
 Route::get('/check-callback', [CallbackController::class, 'checkCallback']);
-
+Route::get('/mpesa/payment-status/{checkoutRequestId}', [CallbackController::class, 'checkPaymentStatus']);
 
 // --- General Application Routes ---
 Route::get('/', fn() => 'Hello, World!');

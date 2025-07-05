@@ -7,6 +7,7 @@ use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Carbon;
 use App\Models\MpesaPayment;
+use Illuminate\Support\Facades\DB;
 
 class CallbackController extends Controller
 {
@@ -80,6 +81,26 @@ class CallbackController extends Controller
             Log::error('Error while handling callback', ['error' => $e->getMessage()]);
         }
     }
+
+    public function checkPaymentStatus($checkoutRequestId)
+{
+    $payment = MpesaPayment::where('checkout_request_id', $checkoutRequestId)->first();
+
+    if (!$payment) {
+        return response()->json([
+            'status' => 'not_found',
+            'message' => 'No payment found',
+        ], 404);
+    }
+
+    return response()->json([
+        'status' => strtolower($payment->status),
+        'paid_at' => $payment->paid_at,
+        'receipt' => $payment->mpesa_receipt_number,
+        'phone' => $payment->phone_number,
+        'amount' => $payment->amount,
+    ]);
+}
     
     public function checkCallback()
     {
